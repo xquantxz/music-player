@@ -16,8 +16,10 @@
         "open": true
       },
       "fs": {
-        "scope": ["**"],
         "readFile": true
+      },
+      "window": {
+        "setFullscreen": true
       }
     },
     "bundle": {
@@ -65,7 +67,8 @@
         "height": 600,
         "resizable": true,
         "title": "music-player",
-        "width": 800
+        "width": 800,
+        "additionalBrowserArgs": ""
       }
     ]
   }
