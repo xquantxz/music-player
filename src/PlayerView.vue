@@ -1,12 +1,16 @@
 <template>
     <input type="button" value="Open File" @click.prevent="openFilePicker"/>
     <div>
+        <div id="player-canvas-container">
+            <PlayerCanvas />
+        </div>
         <div id="player-view-main">
             <h2>Player View</h2>
-            <p v-if="!title">Loading...</p>
             <p v-if="title">{{ title }}</p>
+            <p v-else>Loading...</p>
             <audio id="player-audio" style="display: none;"></audio>
             <hr />
+            <canvas id="oscilloscope" width="200px" height="100px"></canvas>
         </div>
         <div id="player-view-bar">
             <PlayerBar :title="title" :artist="artist" :picture="picture" :play-state="playState"/>
@@ -15,6 +19,13 @@
 </template>
 
 <style scoped>
+
+#player-canvas-container {
+    position: fixed;
+    top: 0;
+    z-index: -1;
+}
+
 #player-view-bar {
     position: absolute;
     bottom: 0;
@@ -28,12 +39,14 @@
 </style>
   
 <script setup lang="ts">
-    import { ref, watch, defineProps, inject, onUnmounted } from "vue";
+    // @ts-nocheck
+    import { ref, watch, defineProps, inject, onUnmounted, onMounted, provide } from "vue";
     import { parseBuffer } from "music-metadata";
     import { readBinaryFile } from '@tauri-apps/api/fs';
     import PlayerBar from "./components/PlayerBar.vue";
+    import PlayerCanvas from "./components/PlayerCanvas.vue";
     import { open } from '@tauri-apps/api/dialog';
-    import { createNewAudioContext } from "./audio";
+    import { createNewAudioContext } from "./utils/audio";
 
     let title = ref("Loading...");
     let artist = ref<string|null>(null);
@@ -50,6 +63,58 @@
     });
 
     let audioContext = createNewAudioContext();
+
+    const analyserNode = audioContext.createAnalyser();
+    analyserNode.fftSize = 2048;
+    const bufferLength = analyserNode.frequencyBinCount;
+    const dataArray = new Uint8Array(bufferLength);
+    const freqArray = new Uint8Array(bufferLength);
+    provide("analyserNode", analyserNode);
+    provide("audioContext", audioContext);
+    analyserNode.getByteTimeDomainData(dataArray);
+
+    let canvas;
+    let canvasCtx;
+
+    onMounted(() => {
+        canvas = document.getElementById("oscilloscope");
+        canvasCtx = canvas.getContext("2d");
+        console.log(canvasCtx)
+    })
+
+    function draw() {
+        analyserNode.getByteTimeDomainData(dataArray);
+        analyserNode.getByteFrequencyData(freqArray);
+
+        canvasCtx.fillStyle = "rgb(0, 0, 0)";
+        canvasCtx.fillRect(0, 0, canvas.width, canvas.height);
+
+        canvasCtx.lineWidth = 2;
+        canvasCtx.strokeStyle = "rgb(0, 222, 22)";
+
+        canvasCtx.beginPath();
+
+        const sliceWidth = (canvas.width) / bufferLength;
+        let x = 0;
+
+        for (let i = 0; i < bufferLength; i++) {
+            const v = freqArray[i] / 255.0;
+            const y = canvas.height * (1 - v);
+
+            if (i === 0) {
+                canvasCtx.moveTo(x, y);
+            } else {
+                canvasCtx.lineTo(x, y);
+            }
+
+            x += sliceWidth;
+        }
+
+        canvasCtx.lineTo(canvas.width, canvas.height / 2);
+        canvasCtx.stroke();
+        requestAnimationFrame(draw);
+    }
+
     let mediaNode: MediaElementAudioSourceNode;
     let gainNode = audioContext.createGain();
 
@@ -128,6 +193,9 @@
           if (!mediaNode)
               mediaNode = audioContext.createMediaElementSource(audio);
           mediaNode.connect(gainNode);
+          mediaNode.connect(analyserNode);
+          requestAnimationFrame(draw);
+
           audio.addEventListener("timeupdate", (event) => {
               if (!event.target) return;
               let target = event.target as HTMLAudioElement;
